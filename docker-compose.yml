@@ -1,53 +1,118 @@
 version: '2.2'
 services:
-  nginx:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.nginx
-      args:
-        PHP_FPM_SERVER: php
-        PHP_FPM_PORT: 9000
-    ports:
-      - ${DOCKER_NGINX_EXTERNAL_PORT-8000}:80
-    depends_on:
-      - php
-    links:
-      - php
-    volumes:
-      - .:/var/www/
+    nginx:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile.nginx
+            args:
+                PHP_FPM_SERVER: php
+                PHP_FPM_PORT: 9000
+        ports:
+            - ${DOCKER_NGINX_EXTERNAL_PORT-8000}:80
+        depends_on:
+            - php
+        networks:
+            - backend
+        volumes:
+            - .:/var/www/
 
-  php:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      args:
-        XDEBUG: "true"
-    volumes:
-      - .:/var/www/
-      - ./docker/php.ini:/usr/local/etc/php/conf.d/php.ini
-    environment:
-      APP_ENV: local
-    links:
-      - mysql
-      - redis
+    php:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+            args:
+                XDEBUG: "true"
+        volumes:
+            - .:/var/www/
+            - ./docker/php.ini:/usr/local/etc/php/conf.d/php.ini
+        environment:
+            APP_ENV: local
+        networks:
+            - backend
 
-  redis:
-      image: redis:5.0.6
-      ports:
-          - ${DOCKER_REDIS_EXTERNAL_PORT-6379}:6379
+    redis:
+        image: redis:5.0.6
+        ports:
+            - ${DOCKER_REDIS_EXTERNAL_PORT-6379}:6379
+        networks:
+            - backend
 
-  mysql:
-    image: mysql:5.7
-    volumes:
-      - mysqldb:/var/lib/mysql
-    environment:
-      MYSQL_DATABASE: app_db
-      MYSQL_ROOT_PASSWORD: secret
-      MYSQL_ALLOW_EMPTY_PASSWORD: "true"
-    ports:
-      - ${DOCKER_MYSQL_EXTERNAL_PORT-3309}:3306
-    command: [ 'mysqld', '--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci' ]
+    mysql:
+        image: mysql:8.0
+        volumes:
+            - mysqldb:/var/lib/mysql
+        environment:
+            MYSQL_DATABASE: app_db
+            MYSQL_ROOT_PASSWORD: secret
+            MYSQL_ALLOW_EMPTY_PASSWORD: "true"
+        ports:
+            - ${DOCKER_MYSQL_EXTERNAL_PORT-3309}:3306
+        command: [ 'mysqld', '--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci' ]
+        networks:
+            - backend
+
+    elasticsearch:
+        build:
+            context: ./docker/elasticsearch
+        volumes:
+            - elasticsearch:/usr/share/elasticsearch/data
+        environment:
+#            - cluster.name=laravel-cluster
+#            - node.name=laravel-node
+#            - bootstrap.memory_lock=true
+#            - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+#            - cluster.initial_master_nodes=laravel-node
+            - http.port=9200
+            - discovery.type=single-node
+            - http.max_content_length=10MB
+            - http.cors.enabled=true
+            - http.cors.allow-origin=\*
+            - http.cors.allow-headers=X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization
+            - http.cors.allow-credentials=true
+            - network.publish_host=localhost
+            - xpack.security.enabled=false
+        ulimits:
+            memlock:
+                soft: -1
+                hard: -1
+            nofile:
+                soft: 65536
+                hard: 65536
+        ports:
+            - "9200:9200"
+            - "9300:9300"
+        depends_on:
+            - php
+        networks:
+            - backend
+    ### Kibana ##############################################
+    kibana:
+        build:
+            context: ./docker/kibana
+        ports:
+            - "5601:5601"
+        depends_on:
+            - elasticsearch
+        networks:
+            - backend
+
+    ### Dejavu ##############################################
+    dejavu:
+        build:
+            context: ./docker/dejavu
+        ports:
+            - "1358:1358"
+        depends_on:
+            - elasticsearch
+        networks:
+            - backend
 
 volumes:
     mysqldb:
         driver: local
+    elasticsearch:
+        driver: local
+
+networks:
+    backend:
+        driver: "bridge"
